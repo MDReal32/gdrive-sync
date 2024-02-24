@@ -1,7 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-
-import { readFileSync } from "fs";
 
 import * as parser from "@gerhobbelt/gitignore-parser";
 

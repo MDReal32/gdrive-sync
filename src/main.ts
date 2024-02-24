@@ -1,24 +1,31 @@
+import yargs from "yargs";
+import { hideBin } from "yargs/helpers";
+
 import { fileConfig, userConfig } from "./config";
-import { GoogleUploader } from "./core/google-uploader";
-import { Ignore } from "./core/ignore";
-import { Sync } from "./core/sync";
+import { Bootstrap } from "./core/bootstrap";
 import { Config } from "./utils/config";
 
 (async () => {
-  Config.loadConfigs(userConfig, fileConfig);
+  const {
+    _: [folderPathUploadTo],
+    parallelUploads
+  } = await yargs(hideBin(process.argv))
+    .scriptName("gdrive")
+    .demandCommand(1, "Please provide a folder where to upload.")
+    .option("parallelUploads", {
+      alias: "p",
+      type: "number",
+      describe: "Number of parallel uploads",
+      default: 10,
+      demandOption: true
+    })
+    .parse();
 
-  const folderPathUploadTo = process.argv[2];
-
-  const ignore = new Ignore();
-  const sync = new Sync(process.cwd(), ignore);
-  const uploader = new GoogleUploader(folderPathUploadTo);
-  await uploader.authenticate();
-  sync.use$(uploader);
-
-  await sync.sync();
-  await sync.listenToChanges();
-
-  await uploader.execute(13);
+  const bootstrap = new Bootstrap();
+  await bootstrap.bootstrap({
+    folderPathUploadTo: folderPathUploadTo.toString(),
+    parallelUploads
+  });
 })();
 
 const saveConfigs = () => {

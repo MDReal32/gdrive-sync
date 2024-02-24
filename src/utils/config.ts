@@ -1,7 +1,5 @@
-import { rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-
-import { mkdirSync, readFileSync } from "fs";
 
 import { env } from "../env";
 

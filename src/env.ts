@@ -25,7 +25,12 @@ export const envSchema = z.object({
     }, "invalid JSON")
     .transform(data => JSON.parse(data))
     .pipe(googleCredentials),
-  HOME: z.string()
+  HOME: z.string(),
+  IS_DEV: z
+    .enum(["true", "false"])
+    .transform(data => data === "true")
+    .default("false")
+    .pipe(z.boolean())
 });
 
 export type Env = z.infer<typeof envSchema>;
