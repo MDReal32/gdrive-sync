@@ -1,13 +1,14 @@
-import { createReadStream, statSync } from "node:fs";
-import { basename, dirname, extname, join } from "node:path";
+import { createReadStream } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 import { drive_v3, google } from "googleapis";
 
+import { cacheConfig } from "../config";
+import { getMimeType } from "../utils/get-mime-type";
 import { GoogleExtensions } from "./google-extensions";
 
 export class GoogleDrive extends GoogleExtensions {
   protected readonly _drive: drive_v3.Drive;
-  protected readonly _cache: Map<string, any> = new Map();
 
   constructor() {
     super();
@@ -15,10 +16,14 @@ export class GoogleDrive extends GoogleExtensions {
     this._drive = google.drive({ version: "v3", auth: this._oauth2Client });
   }
 
-  protected getFileById(id: string) {
-    return this.cache(`file::id::${id}`, () =>
-      this._drive.files.get({ fileId: id, fields: "id, name, mimeType" })
+  protected async getFileById(id: string) {
+    const res = await this.cache(`file::id::${id}`, () =>
+      this._drive.files.get({
+        fileId: id,
+        fields: "id, name, mimeType"
+      })
     );
+    return res.data;
   }
 
   protected getFileByName(path: string, parentId?: string) {
@@ -26,13 +31,19 @@ export class GoogleDrive extends GoogleExtensions {
     return this.cache(`file::${path}`, () =>
       this._drive.files.list({
         q: `name='${name}' and trashed=false and '${parentId ? parentId : "root"}' in parents`,
-        fields: "files(id, name, mimeType)"
+        fields: "files(id, name, size, mimeType)"
       })
     );
   }
 
   protected async getFolderByName(path: string, parentId?: string) {
+    const base = dirname(path);
     const name = basename(path);
+
+    if (base !== ".") {
+      parentId = await this.getFolderByName(base, parentId);
+    }
+
     return this.cache(`folder::${path}`, async () => {
       const res = await this._drive.files.list({
         q: `name='${name}' and trashed=false and mimeType='application/vnd.google-apps.folder' and '${parentId ? parentId : "root"}' in parents`,
@@ -64,12 +75,9 @@ export class GoogleDrive extends GoogleExtensions {
           fields: "id"
         });
         folderId = res.data.id;
-        this._cache.set(`folder::${folderConstructedPath}`, folderId);
+        await this.cache(`folder::${folderConstructedPath}`, async () => folderId);
       }
-
-
     }
-
 
     return folderId;
   }
@@ -80,17 +88,18 @@ export class GoogleDrive extends GoogleExtensions {
 
     const filename = basename(destination);
     const existingFile = await this.getFileByName(filename, folderId);
+    const f = existingFile.data.files?.[0];
 
-    if (existingFile.data.files?.[0]?.id) {
+    if (f?.id) {
       await this._drive.files.update({
         fileId: existingFile.data.files[0].id!,
-        media: { mimeType: this.getMimeType(file), body: createReadStream(file) }
+        media: { mimeType: getMimeType(file), body: createReadStream(file) }
       });
     } else {
       await this._drive.files.create({
         requestBody: {
           name: filename,
-          mimeType: this.getMimeType(file),
+          mimeType: getMimeType(file),
           parents: folderId ? [folderId] : undefined
         },
         media: { body: createReadStream(file) }
@@ -98,49 +107,13 @@ export class GoogleDrive extends GoogleExtensions {
     }
   }
 
-  private getMimeType(file: string) {
-    const fileStats = statSync(file);
-    if (fileStats.isDirectory()) {
-      return "application/vnd.google-apps.folder";
-    }
-
-    switch (extname(file)) {
-      case ".zip":
-        return "application/zip";
-      case ".png":
-        return "image/png";
-      case ".jpg":
-      case ".jpeg":
-        return "image/jpeg";
-      case ".gif":
-        return "image/gif";
-      case ".pdf":
-        return "application/pdf";
-      case ".doc":
-        return "application/msword";
-      case ".docx":
-        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-      case ".xls":
-        return "application/vnd.ms-excel";
-      case ".xlsx":
-        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-      case ".ppt":
-        return "application/vnd.ms-powerpoint";
-      case ".pptx":
-        return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-      default:
-        return "application/octet-stream";
-    }
-  }
-
   private async cache<R>(key: string, cb: () => Promise<R>): Promise<R> {
-    if (this._cache.has(key)) {
-      return this._cache.get(key);
+    if (cacheConfig.has(key)) {
+      return cacheConfig.get(key);
     }
 
-    return cb().then(data => {
-      this._cache.set(key, data);
-      return data;
-    });
+    const data = await cb();
+    cacheConfig.set(key, data);
+    return data;
   }
 }

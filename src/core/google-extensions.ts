@@ -1,18 +1,13 @@
-import { existsSync, writeFileSync } from "node:fs";
-
-import { readFileSync } from "fs";
-
 import { OAuth2Client } from "google-auth-library";
 import { google } from "googleapis";
 
+import { userConfig } from "../config";
 import { env } from "../env";
-import { Crypto } from "./crypto";
+import { open } from "../utils/open";
 import { Server } from "./server";
 
 export class GoogleExtensions {
   protected readonly _server: Server;
-  protected readonly _crypto = new Crypto();
-  protected readonly _tokenPath = `${env.HOME}/.google-tokens`;
   protected readonly _oauth2Client: OAuth2Client;
   protected readonly _serverPort = 37867;
 
@@ -27,11 +22,10 @@ export class GoogleExtensions {
   }
 
   async authenticate() {
-    if (existsSync(this._tokenPath)) {
-      const tokens = this._crypto.decrypt(readFileSync(this._tokenPath, "utf-8"));
-      const { accessToken, refreshToken, expiryDate } = this.transformToken(
-        this._crypto.decrypt(tokens)
-      );
+    const previousSavedToken = userConfig.get("googleToken");
+
+    if (previousSavedToken) {
+      const { accessToken, refreshToken, expiryDate } = previousSavedToken;
 
       this._oauth2Client.setCredentials({
         access_token: accessToken,
@@ -47,7 +41,9 @@ export class GoogleExtensions {
         const { credentials } = await this._oauth2Client.refreshAccessToken();
         this._oauth2Client.setCredentials(credentials);
         return;
-      } catch {}
+      } catch (e) {
+        console.log("Error", e);
+      }
     }
 
     const authUrl = this._oauth2Client.generateAuthUrl({
@@ -63,7 +59,10 @@ export class GoogleExtensions {
     await new Promise<void>((resolve, reject) => {
       this._server.onRequest(async (req, res) => {
         code = new URLSearchParams(req.url?.split("?")[1] ?? "").get("code");
-        res.end("Authenticated! You can close this tab now.");
+        res.setHeader("Content-Type", "text/html");
+        res.write("Authenticated! You can close this tab now.");
+        res.write("<script>setTimeout(() => window.close(), 1000);</script>");
+        res.end();
         resolve();
       });
     });
@@ -75,33 +74,11 @@ export class GoogleExtensions {
     }
 
     const { tokens } = await this._oauth2Client.getToken(code);
-
-    const encryptedTokens = this._crypto.encrypt(this.transformToToken(tokens));
-    writeFileSync(this._tokenPath, encryptedTokens);
-  }
-
-  protected transformToToken(tokens: OAuth2Client["credentials"]) {
-    const dateAsAlphabet = tokens.expiry_date
-      .toString()
-      .split("")
-      .map(char => String.fromCharCode(char.charCodeAt(0) + 26))
-      .join("")
-      .toLowerCase();
-
-    return `at/${tokens.access_token}/rt/${tokens.refresh_token}/et${dateAsAlphabet}`;
-  }
-
-  protected transformToken(tokens: string) {
-    const [, accessToken, refreshToken, expiryDate] = tokens.match(/^at\/(.+)\/rt\/(.+)\/et(.+)$/);
-
-    return {
-      accessToken,
-      refreshToken,
-      expiryDate: +expiryDate
-        .toUpperCase()
-        .split("")
-        .map(char => String.fromCharCode(char.charCodeAt(0) - 26))
-        .join("")
-    };
+    this._oauth2Client.setCredentials(tokens);
+    userConfig.set("googleToken", {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiryDate: tokens.expiry_date
+    });
   }
 }
