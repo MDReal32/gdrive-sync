@@ -5,7 +5,8 @@
     "moduleResolution": "Node",
     "esModuleInterop": true,
     "rootDir": "src",
-    "outDir": "build"
+    "outDir": "build",
+    "resolveJsonModule": true
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "**/*.test.ts"]
